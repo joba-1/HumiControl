@@ -218,6 +218,7 @@ void respondJson() {
 
 
 void setupWifi() {
+  WiFi.hostname(basename);
   WiFiManager wifiManager;
   wifiManager.setAPCallback(configModeCallbackSlowBlink);
   wifiManager.setTimeout(180); // try for 3 min
@@ -227,7 +228,8 @@ void setupWifi() {
     delay(1000);
   }
 
-  MDNS.begin(basename);
+  if( !MDNS.begin(basename) )
+    Serial.println("MDNS.begin(hostname) failed");
 
   ntpTime.begin();
 
@@ -289,7 +291,7 @@ void setup() {
   ticker.detach();
   digitalWrite(LED_PIN, LED_ON);
 
-  Serial.printf("\nStarted %s V1.0 with IP=%s\n",
+  Serial.printf("\nStarted %s V" VERSION " - " VERDATE " with IP=%s\n",
     basename, WiFi.localIP().toString().c_str());
 }
 
