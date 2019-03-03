@@ -5,5 +5,5 @@
 .gcc-flags.json
 .travis.yml
 include/
-lib/
+lib/readme.txt
 test/
