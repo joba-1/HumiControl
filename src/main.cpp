@@ -25,6 +25,8 @@ const char msgTemplate[] = "<!DOCTYPE html><html><head>"
   "<tr><td>Air Humidity</td><td style='float:right;'>%0.2f</td><td>%%</td></tr>"
   "<tr><td>Temperature</td><td style='float:right;'>%0.2f</td><td>&deg;C</td></tr>"
   "<tr><td>Pressure</td><td style='float:right;'>%0.2f</td><td>mBar</td></tr>"
+  "<tr><td><form action='/on'><button>Fan On</button></form></td>"
+  "<td style='float:right;'><form action='/off'><button>Fan Off</button></form></td></tr>"
   "</table><p/><a href='/version'>Firmware version</a></body></html>";
 
 // for online update
@@ -44,7 +46,7 @@ const char versionTemplate[] = "<!DOCTYPE html><html><head>"
   "<tr><td>Update</td><td><input type='file' name='update'></td>"
   "<td><input type='submit' value='Update'></td></tr></form>"
   "<form method='POST' action='/reset'>"
-  "<tr><td>Reset</td><td>Humidity Control</td><td><button type='submit'>Now</button></td></tr></form>"
+  "<tr><td>Reset</td><td>Humidity Control</td><td><button>Now</button></td></tr></form>"
   "</table><p/>Hint: Update with a new firmware.bin can be done with"
   "<p/>curl -vF 'image=@firmware.bin' %s.local/update"
   "<p/><a href='/'>Humidity Control</a> as <a href='/json'>JSON</a></body></html>";
@@ -72,18 +74,24 @@ const char jsonTemplate[] = "{\"name\":\"%s\",\"version\":\"%s\","
 // for LED status
 #include <Ticker.h>
 Ticker ticker;
-#define LED_PIN D4
-#define LED_ON  LOW
-#define LED_OFF HIGH
+#define LED_PIN D7
+#define LED_ON  HIGH
+#define LED_OFF LOW
 
 // for capacitive moisture sensor calibration data (raw A0 reading in water/air)
 #define A0_WET 875
 #define A0_DRY 445
 double soil_moisture;
 
+// for fan control
+#define FANPOWER_PIN D5
+#define FANRPM_PIN   D6
+
 // for BME280 API from https://github.com/BoschSensortec/BME280_driver.git
 #include <Wire.h>
 #include "bme280.h"
+#define I2C_SCL_PIN D1
+#define I2C_SDA_PIN D2
 
 struct bme280_dev dev;
 struct bme280_data comp_data;
@@ -237,6 +245,16 @@ void setupWifi() {
 
   web_server.on("/version", respondVersion);
   web_server.on("/json", respondJson);
+  web_server.on("/on", []() {
+    digitalWrite(FANPOWER_PIN, HIGH);
+    web_server.sendHeader("Location", "/");
+    web_server.send(302, "text/plain", "ok");
+  });
+  web_server.on("/off", []() {
+    digitalWrite(FANPOWER_PIN, LOW);
+    web_server.sendHeader("Location", "/");
+    web_server.send(302, "text/plain", "ok");
+  });
   web_server.on("/reset", []() {
     web_server.sendHeader("Connection", "close");
     web_server.send(200, "text/plain", "ok: reset\n");
@@ -257,7 +275,11 @@ void setup() {
   pinMode(LED_PIN, OUTPUT);
   ticker.attach(0.2, tick);
 
-  Wire.begin(D6, D5); // adjust to the pins you use for SDA and SCL
+  pinMode(FANPOWER_PIN, OUTPUT);
+  digitalWrite(FANPOWER_PIN, LOW); // fan initially off
+
+  // for bme280
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
 
   // Setup BME280 for reading single values
   dev.dev_id = BME280_I2C_ADDR_PRIM;
@@ -306,6 +328,7 @@ void handle_button() {
     if( pressed_since == 0 ) {
       pressed_since = now;
       digitalWrite(LED_PIN, LED_OFF);
+      digitalWrite(FANPOWER_PIN, digitalRead(FANPOWER_PIN) == HIGH ? LOW : HIGH);
     }
     else if ( now - pressed_since > 5000 ) {
       digitalWrite(LED_PIN, LED_ON);
