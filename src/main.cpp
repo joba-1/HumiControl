@@ -27,6 +27,8 @@ const char msgTemplate[] = "<!DOCTYPE html><html><head>"
   "<tr><td>Pressure</td><td style='float:right;'>%0.2f</td><td>mBar</td></tr>"
   "<tr><td><form action='/on'><button>Fan On</button></form></td>"
   "<td style='float:right;'><form action='/off'><button>Fan Off</button></form></td></tr>"
+  "<tr><form action='/speed'><td><input type='range' min='0' max='100' value='%lu' name='percent'></td>"
+  "<td style='float:right;'><button>Set Speed</button></td></form></tr>"
   "</table><p/><a href='/version'>Firmware version</a></body></html>";
 
 // for online update
@@ -86,6 +88,8 @@ double soil_moisture;
 // for fan control
 #define FANPOWER_PIN D5
 #define FANRPM_PIN   D6
+#define MIN_PWM     700
+
 
 // for BME280 API from https://github.com/BoschSensortec/BME280_driver.git
 #include <Wire.h>
@@ -188,13 +192,29 @@ int8_t bme280_forced_mode( struct bme280_dev *dev, struct bme280_data *comp_data
 }
 
 
+uint16_t pwm2percent( uint16_t pwm ) {
+  if( pwm <= MIN_PWM ) return 0;
+  pwm -= MIN_PWM;
+  return (pwm * 100) / (PWMRANGE - MIN_PWM);
+}
+
+
+uint16_t percent2pwm( uint16_t percent ) {
+  if ( percent == 0 ) return 0;
+  return MIN_PWM + (percent * (PWMRANGE - MIN_PWM)) / 100;
+}
+
+
 void respond() {
   digitalWrite(LED_PIN, LED_OFF);
   web_server.sendHeader("Connection", "close");
 
+  unsigned long pwm_speed = analogRead(FANPOWER_PIN);
+  unsigned long speed = pwm2percent(pwm_speed);
   snprintf(msg, sizeof(msg), msgTemplate, basename, basename,
     ntpTime.getFormattedTime().c_str(), soil_moisture,
-    comp_data.humidity, comp_data.temperature, comp_data.pressure/100);
+    comp_data.humidity, comp_data.temperature, comp_data.pressure/100, speed);
+  Serial.printf("Fan power is %lu (%lu%%)\n", pwm_speed, speed);
 
   web_server.send(200, "text/html", msg);
   digitalWrite(LED_PIN, LED_ON);
@@ -255,6 +275,32 @@ void setupWifi() {
     web_server.sendHeader("Location", "/");
     web_server.send(302, "text/plain", "ok");
   });
+  web_server.on("/speed", []() {
+    static const unsigned long invalid = 0xffff;
+    unsigned long speed = invalid;
+    for( uint8_t i = 0; i < web_server.args(); i++ ) {
+      if( web_server.argName(i).equals("percent") ) {
+        const char *arg = web_server.arg(i).c_str();
+        char *endp;
+        speed = strtoul(arg, &endp, 0);
+        if( arg == endp || speed > 100 ) {
+          speed = invalid;
+        }
+      }
+    }
+    if( speed != invalid ) {
+      digitalWrite(FANPOWER_PIN, HIGH);
+      unsigned long pwm_speed = percent2pwm(speed);
+      Serial.printf("Set speed to %lu (%lu%%)\n", pwm_speed, speed);
+      delay(100);
+      analogWrite(FANPOWER_PIN, pwm_speed);
+    }
+    else {
+      Serial.println("No valid speed found");
+    }
+    web_server.sendHeader("Location", "/");
+    web_server.send(302, "text/plain", "ok");
+  });
   web_server.on("/reset", []() {
     web_server.sendHeader("Connection", "close");
     web_server.send(200, "text/plain", "ok: reset\n");
@@ -277,6 +323,7 @@ void setup() {
 
   pinMode(FANPOWER_PIN, OUTPUT);
   digitalWrite(FANPOWER_PIN, LOW); // fan initially off
+  analogWriteFreq(100*1000);
 
   // for bme280
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
@@ -328,7 +375,7 @@ void handle_button() {
     if( pressed_since == 0 ) {
       pressed_since = now;
       digitalWrite(LED_PIN, LED_OFF);
-      digitalWrite(FANPOWER_PIN, digitalRead(FANPOWER_PIN) == HIGH ? LOW : HIGH);
+      digitalWrite(FANPOWER_PIN, digitalRead(FANPOWER_PIN) != LOW ? LOW : HIGH);
     }
     else if ( now - pressed_since > 5000 ) {
       digitalWrite(LED_PIN, LED_ON);
