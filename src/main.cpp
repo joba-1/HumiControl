@@ -66,8 +66,9 @@ WiFiUDP ntpUDP;
 NTPClient ntpTime(ntpUDP, "europe.pool.ntp.org", 0, 600000);
 
 // for json page
-const char jsonTemplate[] = "{\"name\":\"%s\",\"version\":\"%s\","
-  "\"monitor\":{\"utc_time\":{\"value\":\"%s\",\"units\":\"h:m:s\"},"
+const char jsonTemplate[] = "{\"name\":\"%s\",\"version\":\"%s\",\"monitor\":{"
+  "\"utc_time\":{\"value\":\"%s\",\"units\":\"h:m:s\"},"
+  "\"uptime\":{\"value\":\"%lu\",\"units\":\"ms\"},"
   "\"soil_moisture\":{\"value\":%0.2f,\"units\":\"percent\"},"
   "\"air_humidity\":{\"value\":%0.2f,\"units\":\"percent\"},"
   "\"temperature\":{\"value\":%0.2f,\"units\":\"celsius\"},"
@@ -243,7 +244,7 @@ void respondJson() {
   web_server.sendHeader("Connection", "close");
 
   snprintf(msg, sizeof(msg), jsonTemplate, basename, VERSION,
-    ntpTime.getFormattedTime().c_str(), soil_moisture, comp_data.humidity,
+    ntpTime.getFormattedTime().c_str(), millis(), soil_moisture, comp_data.humidity,
     comp_data.temperature, comp_data.pressure/100, pwm2percent(curr_pwm));
 
   web_server.send(200, "application/json", msg);
