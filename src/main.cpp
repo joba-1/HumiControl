@@ -20,16 +20,19 @@ const char msgTemplate[] = "<!DOCTYPE html><html><head>"
   "<title>%s Humidity Control</title>"
   "<meta http-equiv='refresh' content='10'>"
   "</head><body><h1>%s</h1><h2>Humidity Control</h2><table>"
-  "<tr><td>Current Time</td><td style='float:right;'>%s</td><td>UTC</td></tr>"
+  "<tr><td style='width:50%%;'>Current Time</td><td style='float:right;'>%s</td><td style='width:20%%'>UTC</td></tr>"
   "<tr><td>Soil Moisture</td><td style='float:right;'>%0.2f</td><td>%%</td></tr>"
   "<tr><td>Air Humidity</td><td style='float:right;'>%0.2f</td><td>%%</td></tr>"
   "<tr><td>Temperature</td><td style='float:right;'>%0.2f</td><td>&deg;C</td></tr>"
   "<tr><td>Pressure</td><td style='float:right;'>%0.2f</td><td>mBar</td></tr>"
-  "<tr><td><form action='/on'><button>Fan On</button></form></td>"
-  "<td style='float:right;'><form action='/off'><button>Fan Off</button></form></td></tr>"
-  "<tr><form action='/speed'><td><input type='range' min='0' max='100' value='%lu' name='percent'></td>"
-  "<td style='float:right;'><button>Set Speed</button></td></form></tr>"
-  "</table><p/><a href='/version'>Firmware version</a></body></html>";
+  "<tr><td><form action='/on'><button style='width:90%%;'>Fan On</button></form></td>"
+  "<td colspan='2'><form action='/off'><button style='width:90%%;'>Fan Off</button></form></td></tr>"
+  "<tr><form action='/speed'><td><input type='range' id='speed' min='0' max='100' value='%lu' name='percent'></td>"
+  "<td colspan='2'><button style='width:90%%;'>Speed <span id='value'></span></button></td></form></tr>"
+  "</table><p/><a href='/version'>Firmware version</a><script>"
+  "var s=document.getElementById(\"speed\"); var v=document.getElementById(\"value\");"
+  "v.innerHTML=s.value; s.oninput=function(){v.innerHTML=this.value;}"
+  "</script></body></html>";
 
 // for online update
 #include <WiFiClient.h>
@@ -89,7 +92,7 @@ double soil_moisture;
 #define FANPOWER_PIN D5
 #define FANRPM_PIN   D6
 #define MIN_PWM     700
-
+static uint16_t curr_pwm = 0;
 
 // for BME280 API from https://github.com/BoschSensortec/BME280_driver.git
 #include <Wire.h>
@@ -209,12 +212,11 @@ void respond() {
   digitalWrite(LED_PIN, LED_OFF);
   web_server.sendHeader("Connection", "close");
 
-  unsigned long pwm_speed = analogRead(FANPOWER_PIN);
-  unsigned long speed = pwm2percent(pwm_speed);
+  uint16_t speed = pwm2percent(curr_pwm);
   snprintf(msg, sizeof(msg), msgTemplate, basename, basename,
     ntpTime.getFormattedTime().c_str(), soil_moisture,
     comp_data.humidity, comp_data.temperature, comp_data.pressure/100, speed);
-  Serial.printf("Fan power is %lu (%lu%%)\n", pwm_speed, speed);
+  Serial.printf("Fan power is %lu (%lu%%)\n", curr_pwm, speed);
 
   web_server.send(200, "text/html", msg);
   digitalWrite(LED_PIN, LED_ON);
@@ -245,6 +247,34 @@ void respondJson() {
 }
 
 
+void respondSpeed() {
+  static const unsigned long invalid = 0xffff;
+  unsigned long speed = invalid;
+  for( uint8_t i = 0; i < web_server.args(); i++ ) {
+    if( web_server.argName(i).equals("percent") ) {
+      const char *arg = web_server.arg(i).c_str();
+      char *endp;
+      speed = strtoul(arg, &endp, 0);
+      if( arg == endp || speed > 100 ) {
+        speed = invalid;
+      }
+    }
+  }
+  if( speed != invalid ) {
+    analogWrite(FANPOWER_PIN, percent2pwm(100));
+    curr_pwm = percent2pwm(speed);
+    Serial.printf("Set speed to %lu (%lu%%)\n", curr_pwm, speed);
+    delay(100);
+    analogWrite(FANPOWER_PIN, curr_pwm);
+  }
+  else {
+    Serial.println("No valid speed found");
+  }
+  web_server.sendHeader("Location", "/");
+  web_server.send(302, "text/plain", "ok");
+}
+
+
 void setupWifi() {
   WiFi.hostname(basename);
   WiFiManager wifiManager;
@@ -265,39 +295,16 @@ void setupWifi() {
 
   web_server.on("/version", respondVersion);
   web_server.on("/json", respondJson);
+  web_server.on("/speed", respondSpeed);
   web_server.on("/on", []() {
-    digitalWrite(FANPOWER_PIN, HIGH);
+    curr_pwm = percent2pwm(100);
+    analogWrite(FANPOWER_PIN, curr_pwm);
     web_server.sendHeader("Location", "/");
     web_server.send(302, "text/plain", "ok");
   });
   web_server.on("/off", []() {
-    digitalWrite(FANPOWER_PIN, LOW);
-    web_server.sendHeader("Location", "/");
-    web_server.send(302, "text/plain", "ok");
-  });
-  web_server.on("/speed", []() {
-    static const unsigned long invalid = 0xffff;
-    unsigned long speed = invalid;
-    for( uint8_t i = 0; i < web_server.args(); i++ ) {
-      if( web_server.argName(i).equals("percent") ) {
-        const char *arg = web_server.arg(i).c_str();
-        char *endp;
-        speed = strtoul(arg, &endp, 0);
-        if( arg == endp || speed > 100 ) {
-          speed = invalid;
-        }
-      }
-    }
-    if( speed != invalid ) {
-      digitalWrite(FANPOWER_PIN, HIGH);
-      unsigned long pwm_speed = percent2pwm(speed);
-      Serial.printf("Set speed to %lu (%lu%%)\n", pwm_speed, speed);
-      delay(100);
-      analogWrite(FANPOWER_PIN, pwm_speed);
-    }
-    else {
-      Serial.println("No valid speed found");
-    }
+    curr_pwm = percent2pwm(0);
+    analogWrite(FANPOWER_PIN, curr_pwm);
     web_server.sendHeader("Location", "/");
     web_server.send(302, "text/plain", "ok");
   });
@@ -322,8 +329,8 @@ void setup() {
   ticker.attach(0.2, tick);
 
   pinMode(FANPOWER_PIN, OUTPUT);
-  digitalWrite(FANPOWER_PIN, LOW); // fan initially off
-  analogWriteFreq(100*1000);
+  analogWriteFreq(100*1000);           // high ultrasonic or fan will beep
+  analogWrite(FANPOWER_PIN, curr_pwm); // fan initially off
 
   // for bme280
   Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
@@ -375,7 +382,7 @@ void handle_button() {
     if( pressed_since == 0 ) {
       pressed_since = now;
       digitalWrite(LED_PIN, LED_OFF);
-      digitalWrite(FANPOWER_PIN, digitalRead(FANPOWER_PIN) != LOW ? LOW : HIGH);
+      analogWrite(FANPOWER_PIN, percent2pwm(curr_pwm != 0 ? 0 : 100));
     }
     else if ( now - pressed_since > 5000 ) {
       digitalWrite(LED_PIN, LED_ON);
