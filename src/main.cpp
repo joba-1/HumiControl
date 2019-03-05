@@ -52,7 +52,7 @@ const char versionTemplate[] = "<!DOCTYPE html><html><head>"
   "</table><p/>Hint: Update with a new firmware.bin can be done with"
   "<p/>curl -vF 'image=@firmware.bin' %s.local/update"
   "<p/><a href='/'>Humidity Control</a> as <a href='/json'>JSON</a></body></html>";
-char msg[sizeof(versionTemplate) + 3*sizeof(basename) + 20];
+char msg[sizeof(msgTemplate) + 3*sizeof(basename) + 20];
 ESP8266HTTPUpdateServer esp_updater;
 
 // for UTC time
