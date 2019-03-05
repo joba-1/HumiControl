@@ -274,7 +274,7 @@ void respondSpeed() {
 
 
 void setupWifi() {
-  WiFi.hostname(basename);
+  // WiFi.hostname(basename);
   WiFiManager wifiManager;
   wifiManager.setAPCallback(configModeCallbackSlowBlink);
   wifiManager.setTimeout(180); // try for 3 min
