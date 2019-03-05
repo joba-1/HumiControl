@@ -87,8 +87,10 @@ Ticker ticker;
 #define LED_OFF LOW
 
 // for capacitive moisture sensor calibration data (raw A0 reading in water/air)
+#define A0_TOO_HIGH 950
 #define A0_WET 875
 #define A0_DRY 445
+#define A0_TOO_LOW 350
 double soil_moisture;
 
 // for fan control
@@ -171,7 +173,11 @@ uint16_t percent2pwm( uint16_t percent ) {
 
 
 double readSoilMoisture() {
-  return map(constrain( analogRead(A0), A0_DRY, A0_WET ), A0_WET, A0_DRY, 0, 10000) / 100.0;
+  int value = analogRead(A0);
+  if( value <= A0_TOO_LOW || value >= A0_TOO_HIGH ) {
+    return NAN;
+  }
+  return map(constrain(value, A0_DRY, A0_WET ), A0_WET, A0_DRY, 0, 10000) / 100.0;
 }
 
 void print_sensor_data( struct bme280_data *comp_data, double soil_percent ) {
