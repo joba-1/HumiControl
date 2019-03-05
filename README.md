@@ -4,6 +4,7 @@
 
 A Bosch BME280 delivers air humidity data
 An analog capacitive moisture sensor delivers soil humidity data
+A Fan is controlled with a pwm pin via web slider control
 Setup Wifi with captive portal.
 Reset Wifi settings with long press of flash button
 Led feedback:
@@ -11,6 +12,11 @@ Led feedback:
 * slow blink: wifi setup
 * on: normal operation
 * off: flash button pressed (on again if long press detected)
+
+## Todo
+
+* Use humidity value to set fan speed.
+* mDNS does not work
 
 ## Software Installation
 
