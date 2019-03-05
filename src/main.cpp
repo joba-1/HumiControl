@@ -68,7 +68,7 @@ NTPClient ntpTime(ntpUDP, "europe.pool.ntp.org", 0, 600000);
 // for json page
 const char jsonTemplate[] = "{\"name\":\"%s\",\"version\":\"%s\",\"monitor\":{"
   "\"utc_time\":{\"value\":\"%s\",\"units\":\"h:m:s\"},"
-  "\"uptime\":{\"value\":\"%lu\",\"units\":\"ms\"},"
+  "\"uptime\":{\"value\":%lu,\"units\":\"ms\"},"
   "\"soil_moisture\":{\"value\":%0.2f,\"units\":\"percent\"},"
   "\"air_humidity\":{\"value\":%0.2f,\"units\":\"percent\"},"
   "\"temperature\":{\"value\":%0.2f,\"units\":\"celsius\"},"
