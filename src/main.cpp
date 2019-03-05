@@ -21,13 +21,14 @@ const char msgTemplate[] = "<!DOCTYPE html><html><head>"
   "<meta http-equiv='refresh' content='10'>"
   "</head><body><h1>%s</h1><h2>Humidity Control</h2><table>"
   "<tr><td style='width:50%%;'>Current Time</td><td style='float:right;'>%s</td><td style='width:20%%'>UTC</td></tr>"
+  "<tr><td>Uptime</td><td style='float:right;'>%u:%02u:%02u</td><td>d:h:m</td></tr>"
   "<tr><td>Soil Moisture</td><td style='float:right;'>%0.2f</td><td>%%</td></tr>"
   "<tr><td>Air Humidity</td><td style='float:right;'>%0.2f</td><td>%%</td></tr>"
   "<tr><td>Temperature</td><td style='float:right;'>%0.2f</td><td>&deg;C</td></tr>"
   "<tr><td>Pressure</td><td style='float:right;'>%0.2f</td><td>mBar</td></tr>"
   "<tr><td><form action='/on'><button style='width:90%%;'>Fan On</button></form></td>"
   "<td colspan='2'><form action='/off'><button style='width:90%%;'>Fan Off</button></form></td></tr>"
-  "<tr><form action='/speed'><td><input type='range' id='speed' min='0' max='100' value='%lu' name='percent'></td>"
+  "<tr><form action='/speed'><td><input type='range' id='speed' min='0' max='100' value='%u' name='percent'></td>"
   "<td colspan='2'><button style='width:90%%;'>Speed <span id='value'></span></button></td></form></tr>"
   "</table><p/><a href='/version'>Firmware version</a><script>"
   "var s=document.getElementById(\"speed\"); var v=document.getElementById(\"value\");"
@@ -70,7 +71,8 @@ const char jsonTemplate[] = "{\"name\":\"%s\",\"version\":\"%s\","
   "\"soil_moisture\":{\"value\":%0.2f,\"units\":\"percent\"},"
   "\"air_humidity\":{\"value\":%0.2f,\"units\":\"percent\"},"
   "\"temperature\":{\"value\":%0.2f,\"units\":\"celsius\"},"
-  "\"pressure\":{\"value\":%0.2f,\"units\":\"mbar\"}}}";
+  "\"pressure\":{\"value\":%0.2f,\"units\":\"mbar\"},"
+  "\"speed\":{\"value\":%u,\"units\":\"percent\"}}}";
 
 // for button press to reset wifi settings
 #define BUTTON_PIN     D3
@@ -154,14 +156,28 @@ int8_t user_i2c_write( uint8_t dev_id, uint8_t reg_addr, uint8_t *reg_data, uint
 }
 
 
+uint16_t pwm2percent( uint16_t pwm ) {
+  if( pwm <= MIN_PWM ) return 0;
+  pwm -= MIN_PWM;
+  return (pwm * 100 + (PWMRANGE - MIN_PWM) / 2) / (PWMRANGE - MIN_PWM);
+}
+
+
+uint16_t percent2pwm( uint16_t percent ) {
+  if ( percent == 0 ) return 0;
+  return MIN_PWM + (percent * (PWMRANGE - MIN_PWM) + 50) / 100;
+}
+
+
 double readSoilMoisture() {
   return map(constrain( analogRead(A0), A0_DRY, A0_WET ), A0_WET, A0_DRY, 0, 10000) / 100.0;
 }
 
 void print_sensor_data( struct bme280_data *comp_data, double soil_percent ) {
 #ifdef BME280_FLOAT_ENABLE
-  printf("%0.2f °C,  %0.2f mBar,  %0.2f %% Air Humidity,  %0.2f %% Soil Moisture\r\n",
-    comp_data->temperature, comp_data->pressure/100, comp_data->humidity, soil_percent);
+  Serial.printf("%0.2f °C,  %0.2f mBar,  %0.2f %% Air Humidity,  %0.2f %% Soil Moisture,  %u %% Fan Speed\r\n",
+    comp_data->temperature, comp_data->pressure/100, comp_data->humidity,
+    soil_percent, pwm2percent(curr_pwm));
 #else
   printf("%ld, %ld, %ld\r\n",
     comp_data->temperature, comp_data->pressure, comp_data->humidity);
@@ -195,28 +211,16 @@ int8_t bme280_forced_mode( struct bme280_dev *dev, struct bme280_data *comp_data
 }
 
 
-uint16_t pwm2percent( uint16_t pwm ) {
-  if( pwm <= MIN_PWM ) return 0;
-  pwm -= MIN_PWM;
-  return (pwm * 100) / (PWMRANGE - MIN_PWM);
-}
-
-
-uint16_t percent2pwm( uint16_t percent ) {
-  if ( percent == 0 ) return 0;
-  return MIN_PWM + (percent * (PWMRANGE - MIN_PWM)) / 100;
-}
-
-
 void respond() {
   digitalWrite(LED_PIN, LED_OFF);
   web_server.sendHeader("Connection", "close");
 
   uint16_t speed = pwm2percent(curr_pwm);
+  unsigned long now = millis();
   snprintf(msg, sizeof(msg), msgTemplate, basename, basename,
-    ntpTime.getFormattedTime().c_str(), soil_moisture,
+    ntpTime.getFormattedTime().c_str(), now / (1000*60*60*24),
+    (now / (1000*60*60)) % 24, (now / (1000*60)) % 60, soil_moisture,
     comp_data.humidity, comp_data.temperature, comp_data.pressure/100, speed);
-  Serial.printf("Fan power is %lu (%lu%%)\n", curr_pwm, speed);
 
   web_server.send(200, "text/html", msg);
   digitalWrite(LED_PIN, LED_ON);
@@ -240,7 +244,7 @@ void respondJson() {
 
   snprintf(msg, sizeof(msg), jsonTemplate, basename, VERSION,
     ntpTime.getFormattedTime().c_str(), soil_moisture, comp_data.humidity,
-    comp_data.temperature, comp_data.pressure/100);
+    comp_data.temperature, comp_data.pressure/100, pwm2percent(curr_pwm));
 
   web_server.send(200, "application/json", msg);
   digitalWrite(LED_PIN, LED_ON);
@@ -248,19 +252,11 @@ void respondJson() {
 
 
 void respondSpeed() {
-  static const unsigned long invalid = 0xffff;
-  unsigned long speed = invalid;
-  for( uint8_t i = 0; i < web_server.args(); i++ ) {
-    if( web_server.argName(i).equals("percent") ) {
-      const char *arg = web_server.arg(i).c_str();
-      char *endp;
-      speed = strtoul(arg, &endp, 0);
-      if( arg == endp || speed > 100 ) {
-        speed = invalid;
-      }
-    }
-  }
-  if( speed != invalid ) {
+  digitalWrite(LED_PIN, LED_OFF);
+  web_server.sendHeader("Connection", "close");
+
+  uint16_t speed = web_server.arg("percent").toInt();
+  if( speed <= 100 ) {
     analogWrite(FANPOWER_PIN, percent2pwm(100));
     curr_pwm = percent2pwm(speed);
     Serial.printf("Set speed to %lu (%lu%%)\n", curr_pwm, speed);
@@ -270,8 +266,10 @@ void respondSpeed() {
   else {
     Serial.println("No valid speed found");
   }
+
   web_server.sendHeader("Location", "/");
   web_server.send(302, "text/plain", "ok");
+  digitalWrite(LED_PIN, LED_ON);
 }
 
 
@@ -297,20 +295,37 @@ void setupWifi() {
   web_server.on("/json", respondJson);
   web_server.on("/speed", respondSpeed);
   web_server.on("/on", []() {
+    digitalWrite(LED_PIN, LED_OFF);
+    web_server.sendHeader("Connection", "close");
+
     curr_pwm = percent2pwm(100);
+    Serial.printf("/on -> pwm = %u\n", curr_pwm);
     analogWrite(FANPOWER_PIN, curr_pwm);
+
     web_server.sendHeader("Location", "/");
     web_server.send(302, "text/plain", "ok");
+    digitalWrite(LED_PIN, LED_ON);
   });
   web_server.on("/off", []() {
+    digitalWrite(LED_PIN, LED_OFF);
+    web_server.sendHeader("Connection", "close");
+
     curr_pwm = percent2pwm(0);
+    Serial.printf("/off -> pwm = %u\n", curr_pwm);
     analogWrite(FANPOWER_PIN, curr_pwm);
+
     web_server.sendHeader("Location", "/");
     web_server.send(302, "text/plain", "ok");
+    digitalWrite(LED_PIN, LED_ON);
   });
   web_server.on("/reset", []() {
+    digitalWrite(LED_PIN, LED_OFF);
+    web_server.sendHeader("Connection", "close");
+
     web_server.sendHeader("Connection", "close");
     web_server.send(200, "text/plain", "ok: reset\n");
+    digitalWrite(LED_PIN, LED_ON);
+
     delay(200);
     ESP.restart();
   });
@@ -382,7 +397,8 @@ void handle_button() {
     if( pressed_since == 0 ) {
       pressed_since = now;
       digitalWrite(LED_PIN, LED_OFF);
-      analogWrite(FANPOWER_PIN, percent2pwm(curr_pwm != 0 ? 0 : 100));
+      curr_pwm = percent2pwm(curr_pwm != 0 ? 0 : 100);
+      analogWrite(FANPOWER_PIN, curr_pwm);
     }
     else if ( now - pressed_since > 5000 ) {
       digitalWrite(LED_PIN, LED_ON);
