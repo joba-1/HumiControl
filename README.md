@@ -2,16 +2,16 @@
 
 ## Current Status
 
-A Bosch BME280 delivers air humidity data
-An analog capacitive moisture sensor delivers soil humidity data
-A Fan is controlled with a pwm pin via web slider control
-Setup Wifi with captive portal.
-Reset Wifi settings with long press of flash button
-Led feedback:
-* fast blink: boot setup and wifi connect
-* slow blink: wifi setup
-* on: normal operation
-* off: flash button pressed (on again if long press detected)
+* A Bosch BME280 delivers air humidity data
+* An analog capacitive moisture sensor delivers soil humidity data
+* A fan is controlled with a pwm pin via web slider control or flash button
+* Setup wifi with captive portal.
+* Reset wifi settings with long press of flash button
+* Led feedback:
+    * fast blink: boot setup and wifi connect
+    * slow blink: wifi setup
+    * on: normal operation
+    * off: flash button pressed (on again if long press detected)
 
 ## Todo
 
@@ -32,20 +32,27 @@ Precondition: Python V2
 
 ## Wiring
 
+If you want to use other pins, adjust the #defines accordingly.
+
 ### BME280
 
 This is a breadboard friendly wiring for a standard BME280 breakout board and a NodeMCU:
 All pins align, no extra wiring necessary.
 
     BME280 GND <--> ESP8266 GND
-    BME280 SCL <--> ESP8266 D5
-    BME280 SDA <--> ESP8266 D6
+    BME280 SCL <--> ESP8266 D5 (D1 is standard)
+    BME280 SDA <--> ESP8266 D6 (D2 is standard)
     BME280 3V3 <--> ESP8266 3V3
 
-If you use other pins for SCL and SDA, adjust the Wire.begin(SDA, SCL) call accordingly.
 
 ### Capacitive Soil Moisture Sensor (V1.2)
 
     CAP GND  <--> ESP8266 GND
     CAP VCC  <--> ESP8266 3V3
     CAP AOUT <--> ESP8266 A0
+
+### Fan Power
+
+    for PWM control of a fan connect D5 with mosfet gate.
+    Schematics and pcb board are in the eagle/ subfolder (warning: uses rare p-channel mosfet).
+  
