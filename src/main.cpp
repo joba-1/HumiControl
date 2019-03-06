@@ -69,10 +69,10 @@ NTPClient ntpTime(ntpUDP, "europe.pool.ntp.org", 0, 600000);
 const char jsonTemplate[] = "{\"name\":\"%s\",\"version\":\"%s\",\"monitor\":{"
   "\"utc_time\":{\"value\":\"%s\",\"units\":\"h:m:s\"},"
   "\"uptime\":{\"value\":%lu,\"units\":\"ms\"},"
-  "\"soil_moisture\":{\"value\":%0.2f,\"units\":\"percent\"},"
-  "\"air_humidity\":{\"value\":%0.2f,\"units\":\"percent\"},"
-  "\"temperature\":{\"value\":%0.2f,\"units\":\"celsius\"},"
-  "\"pressure\":{\"value\":%0.2f,\"units\":\"mbar\"},"
+  "\"soil_moisture\":{\"value\":%s,\"units\":\"percent\"},"
+  "\"air_humidity\":{\"value\":%s,\"units\":\"percent\"},"
+  "\"temperature\":{\"value\":%s,\"units\":\"celsius\"},"
+  "\"pressure\":{\"value\":%s,\"units\":\"mbar\"},"
   "\"speed\":{\"value\":%u,\"units\":\"percent\"}}}";
 
 // for button press to reset wifi settings
@@ -180,6 +180,7 @@ double readSoilMoisture() {
   return map(constrain(value, A0_DRY, A0_WET ), A0_WET, A0_DRY, 0, 10000) / 100.0;
 }
 
+
 void print_sensor_data( struct bme280_data *comp_data, double soil_percent ) {
 #ifdef BME280_FLOAT_ENABLE
   Serial.printf("%0.2f °C,  %0.2f mBar,  %0.2f %% Air Humidity,  %0.2f %% Soil Moisture,  %u %% Fan Speed\r\n",
@@ -218,6 +219,21 @@ int8_t bme280_forced_mode( struct bme280_dev *dev, struct bme280_data *comp_data
 }
 
 
+void validate_sensor_data( struct bme280_data *comp_data ) {
+  if( comp_data->humidity == 0 ) {
+    comp_data->humidity == NAN;
+  }
+
+  if( comp_data->temperature < -140 ) {
+    comp_data->temperature = NAN;
+  }
+
+  if( comp_data->pressure > 115000 ) {
+    comp_data->pressure = NAN;
+  }
+}
+
+
 void respond() {
   digitalWrite(LED_PIN, LED_OFF);
   web_server.sendHeader("Connection", "close");
@@ -245,13 +261,25 @@ void respondVersion() {
 }
 
 
+char *double2Json( double value, char *buffer, size_t size ) {
+  // JSON NaN madness
+  if( isnan(value) || size < snprintf(buffer, size, "%0.2f", value) ) {
+    snprintf(buffer, size, "null");
+  }
+  return buffer;
+}
+
+
 void respondJson() {
   digitalWrite(LED_PIN, LED_OFF);
   web_server.sendHeader("Connection", "close");
 
+  char b[4][10];
+  size_t s = sizeof(b[0]);
   snprintf(msg, sizeof(msg), jsonTemplate, basename, VERSION,
-    ntpTime.getFormattedTime().c_str(), millis(), soil_moisture, comp_data.humidity,
-    comp_data.temperature, comp_data.pressure/100, pwm2percent(curr_pwm));
+    ntpTime.getFormattedTime().c_str(), millis(), double2Json(soil_moisture, b[0], s),
+    double2Json(comp_data.humidity, b[1], s), double2Json(comp_data.temperature, b[2], s),
+    double2Json(comp_data.pressure/100, b[3], s), pwm2percent(curr_pwm));
 
   web_server.send(200, "application/json", msg);
   digitalWrite(LED_PIN, LED_ON);
@@ -437,6 +465,7 @@ void handle_sensor() {
     last_measurement = now;
     soil_moisture = readSoilMoisture();
     if( bme280_forced_mode(&dev, &comp_data) == 0 ) {
+      validate_sensor_data(&comp_data);
       print_sensor_data(&comp_data, soil_moisture);
     }
   }
