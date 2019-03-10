@@ -5,6 +5,7 @@
 * A Bosch BME280 delivers air humidity data
 * An analog capacitive moisture sensor delivers soil humidity data
 * A fan is controlled with a pwm pin via web slider control or flash button
+* Automatic mode uses humidity value to set fan speed.
 * Setup wifi with captive portal.
 * Reset wifi settings with long press of flash button
 * Led feedback:
@@ -15,10 +16,11 @@
 
 ## Todo
 
-* Use humidity value to set fan speed.
-* mDNS does not work
+* mDNS does not work properly
+* mqtt integration
+* configurable limits for the automatic fan control
 
-## Software Installation
+## Flash Software Installation
 
 Precondition: Python V2
 
