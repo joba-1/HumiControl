@@ -26,8 +26,8 @@ const char msgTemplate[] = "<!DOCTYPE html><html><head>"
   "<tr><td>Air Humidity</td><td style='float:right;'>%0.2f</td><td>%%</td></tr>"
   "<tr><td>Temperature</td><td style='float:right;'>%0.2f</td><td>&deg;C</td></tr>"
   "<tr><td>Pressure</td><td style='float:right;'>%0.2f</td><td>mBar</td></tr>"
-  "<tr><td><form action='/off'><button style='width:90%%;'>Fan Off</button></form></td>"
-  "<td colspan='2'><form action='/on'><button style='width:90%%;'>Fan On</button></form></td></tr>"
+  "<tr><td><form action='/auto'><button style='width:90%%;'>Auto %s</button></form></td>"
+  "<td colspan='2'><form action='/off'><button style='width:90%%;'>Fan Off</button></form></td></tr>"
   "<tr><form action='/speed'><td><input type='range' id='speed' min='0' max='100' value='%u' name='percent'></td>"
   "<td colspan='2'><button style='width:90%%;'>Speed <span id='value'></span></button></td></form></tr>"
   "</table><p/><a href='/version'>Firmware version</a><script>"
@@ -97,7 +97,12 @@ double soil_moisture;
 #define FANPOWER_PIN D5
 #define FANRPM_PIN   D6
 #define MIN_PWM     700
-static uint16_t curr_pwm = 0;
+#define MAX_TEMP     27
+#define MIN_TEMP     18
+#define START_HUMI   45
+#define FULL_HUMI    70
+uint16_t curr_pwm = 0;
+bool auto_fan = true;
 
 // for BME280 API from https://github.com/BoschSensortec/BME280_driver.git
 #include <Wire.h>
@@ -221,7 +226,7 @@ int8_t bme280_forced_mode( struct bme280_dev *dev, struct bme280_data *comp_data
 
 void validate_sensor_data( struct bme280_data *comp_data ) {
   if( comp_data->humidity == 0 ) {
-    comp_data->humidity == NAN;
+    comp_data->humidity = NAN;
   }
 
   if( comp_data->temperature < -140 ) {
@@ -243,7 +248,8 @@ void respond() {
   snprintf(msg, sizeof(msg), msgTemplate, basename, basename,
     ntpTime.getFormattedTime().c_str(), now / (1000*60*60*24),
     (now / (1000*60*60)) % 24, (now / (1000*60)) % 60, soil_moisture,
-    comp_data.humidity, comp_data.temperature, comp_data.pressure/100, speed);
+    comp_data.humidity, comp_data.temperature, comp_data.pressure/100,
+    auto_fan ? "On>Off" : "Off>On", speed);
 
   web_server.send(200, "text/html", msg);
   digitalWrite(LED_PIN, LED_ON);
@@ -263,7 +269,7 @@ void respondVersion() {
 
 char *double2Json( double value, char *buffer, size_t size ) {
   // JSON NaN madness
-  if( isnan(value) || size < snprintf(buffer, size, "%0.2f", value) ) {
+  if( isnan(value) || size < (size_t)snprintf(buffer, size, "%0.2f", value) ) {
     snprintf(buffer, size, "null");
   }
   return buffer;
@@ -292,11 +298,14 @@ void respondSpeed() {
 
   uint16_t speed = web_server.arg("percent").toInt();
   if( speed <= 100 ) {
-    analogWrite(FANPOWER_PIN, percent2pwm(100));
+    if( curr_pwm == 0 ) {
+      analogWrite(FANPOWER_PIN, percent2pwm(100));
+      delay(100);
+    }
     curr_pwm = percent2pwm(speed);
     Serial.printf("Set speed to %lu (%lu%%)\n", curr_pwm, speed);
-    delay(100);
     analogWrite(FANPOWER_PIN, curr_pwm);
+    auto_fan = false;
   }
   else {
     Serial.println("No valid speed found");
@@ -329,6 +338,17 @@ void setupWifi() {
   web_server.on("/version", respondVersion);
   web_server.on("/json", respondJson);
   web_server.on("/speed", respondSpeed);
+  web_server.on("/auto", []() {
+    digitalWrite(LED_PIN, LED_OFF);
+    web_server.sendHeader("Connection", "close");
+
+    auto_fan = !auto_fan;
+    Serial.printf("/auto fan: %s\n", auto_fan ? "on" : "off");
+
+    web_server.sendHeader("Location", "/");
+    web_server.send(302, "text/plain", "ok");
+    digitalWrite(LED_PIN, LED_ON);
+  });
   web_server.on("/on", []() {
     digitalWrite(LED_PIN, LED_OFF);
     web_server.sendHeader("Connection", "close");
@@ -348,6 +368,7 @@ void setupWifi() {
     curr_pwm = percent2pwm(0);
     Serial.printf("/off -> pwm = %u\n", curr_pwm);
     analogWrite(FANPOWER_PIN, curr_pwm);
+    auto_fan = false;
 
     web_server.sendHeader("Location", "/");
     web_server.send(302, "text/plain", "ok");
@@ -457,6 +478,32 @@ void handle_button() {
 }
 
 
+void fan_control() {
+  if( auto_fan ) {
+    uint16_t old = curr_pwm;
+    if( comp_data.temperature >= MIN_TEMP && comp_data.temperature <= MAX_TEMP
+     && comp_data.humidity >= START_HUMI ) {
+      if( comp_data.humidity > FULL_HUMI ) {
+        curr_pwm = percent2pwm(100);
+      }
+      else {
+        curr_pwm = percent2pwm(map((long)(comp_data.humidity*10), START_HUMI*10, FULL_HUMI*10, 0, 100));
+      }
+    }
+    else {
+      curr_pwm = percent2pwm(0);
+    }
+    if( old != curr_pwm ) {
+      if( old == 0 ) {
+        analogWrite(FANPOWER_PIN, percent2pwm(100));
+        delay(100);
+      }
+      analogWrite(FANPOWER_PIN, curr_pwm);
+    }
+  }
+}
+
+
 void handle_sensor() {
   static unsigned long last_measurement = 0;
 
@@ -467,6 +514,7 @@ void handle_sensor() {
     if( bme280_forced_mode(&dev, &comp_data) == 0 ) {
       validate_sensor_data(&comp_data);
       print_sensor_data(&comp_data, soil_moisture);
+      fan_control();
     }
   }
 }
