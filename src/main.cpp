@@ -72,7 +72,8 @@ const char jsonTemplate[] = "{\"name\":\"%s\",\"version\":\"%s\",\"monitor\":{"
   "\"soil_moisture\":{\"value\":%s,\"units\":\"percent\"},"
   "\"air_humidity\":{\"value\":%s,\"units\":\"percent\"},"
   "\"temperature\":{\"value\":%s,\"units\":\"celsius\"},"
-  "\"pressure\":{\"value\":%s,\"units\":\"mbar\"},"
+  "\"pressure\":{\"value\":%s,\"units\":\"hPa\"},"
+  "\"automatic\":{\"value\":%s,\"units\":\"bool\"},"
   "\"speed\":{\"value\":%u,\"units\":\"percent\"}}}";
 
 // for button press to reset wifi settings
@@ -285,7 +286,7 @@ void respondJson() {
   snprintf(msg, sizeof(msg), jsonTemplate, basename, VERSION,
     ntpTime.getFormattedTime().c_str(), millis(), double2Json(soil_moisture, b[0], s),
     double2Json(comp_data.humidity, b[1], s), double2Json(comp_data.temperature, b[2], s),
-    double2Json(comp_data.pressure/100, b[3], s), pwm2percent(curr_pwm));
+    double2Json(comp_data.pressure/100, b[3], s), auto_fan ? "true" : "false", pwm2percent(curr_pwm));
 
   web_server.send(200, "application/json", msg);
   digitalWrite(LED_PIN, LED_ON);
