@@ -1,4 +1,4 @@
-= HumidityControl
+# HumidityControl
 
 * Wlan manager for ip config. Async possible?
  * See https://github.com/tzapu/WiFiManager/issues/723
