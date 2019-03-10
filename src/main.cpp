@@ -491,8 +491,21 @@ void handle_button() {
     if( pressed_since == 0 ) {
       pressed_since = now;
       digitalWrite(LED_PIN, LED_OFF);
-      curr_pwm = percent2pwm(curr_pwm != 0 ? 0 : 100);
-      analogWrite(FANPOWER_PIN, curr_pwm);
+      // fan off -> on -> auto -> off
+      if( auto_fan ) {
+        auto_fan = false;
+        setEeprom();
+        curr_pwm = percent2pwm(0);
+        analogWrite(FANPOWER_PIN, curr_pwm);
+      }
+      else if( curr_pwm == 0 ) {
+        curr_pwm = percent2pwm(100);
+        analogWrite(FANPOWER_PIN, curr_pwm);
+      }
+      else {
+        auto_fan = true;
+        setEeprom();
+      }
     }
     else if ( now - pressed_since > 5000 ) {
       digitalWrite(LED_PIN, LED_ON);
@@ -531,6 +544,7 @@ void fan_control() {
     else {
       curr_pwm = percent2pwm(0);
     }
+    
     if( old != curr_pwm ) {
       if( old == 0 ) {
         analogWrite(FANPOWER_PIN, percent2pwm(100));
