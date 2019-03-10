@@ -103,7 +103,7 @@ double soil_moisture;
 #define START_HUMI   45
 #define FULL_HUMI    70
 uint16_t curr_pwm = 0;
-bool auto_fan = true;
+bool auto_fan = false;
 
 // for BME280 API from https://github.com/BoschSensortec/BME280_driver.git
 #include <Wire.h>
@@ -114,6 +114,32 @@ bool auto_fan = true;
 struct bme280_dev dev;
 struct bme280_data comp_data;
 bool   sensor_found;
+
+// for persistent settings
+#include <EEPROM.h>
+#define EEPROM_MAGIC     (0xabcd4321)
+typedef struct {
+  bool auto_fan;      // automatic fan control
+  uint32_t magic;     // verify eeprom data is ours
+} eeprom_t;
+
+
+// Save current settings permanently
+void setEeprom() {
+  eeprom_t data { auto_fan, EEPROM_MAGIC };
+  EEPROM.put(0, data);
+  EEPROM.commit();
+}
+
+
+// Read previously saved settings
+void getEeprom() {
+  eeprom_t data;
+  EEPROM.get(0, data);
+  if( data.magic == EEPROM_MAGIC ) {
+    auto_fan = data.auto_fan;
+  }
+}
 
 
 void tick() {
@@ -306,7 +332,10 @@ void respondSpeed() {
     curr_pwm = percent2pwm(speed);
     Serial.printf("Set speed to %lu (%lu%%)\n", curr_pwm, speed);
     analogWrite(FANPOWER_PIN, curr_pwm);
-    auto_fan = false;
+    if( auto_fan == true ) {
+      auto_fan = false;
+      setEeprom();
+    }
   }
   else {
     Serial.println("No valid speed found");
@@ -344,6 +373,8 @@ void setupWifi() {
     web_server.sendHeader("Connection", "close");
 
     auto_fan = !auto_fan;
+    setEeprom();
+
     Serial.printf("/auto fan: %s\n", auto_fan ? "on" : "off");
 
     web_server.sendHeader("Location", "/");
@@ -369,7 +400,10 @@ void setupWifi() {
     curr_pwm = percent2pwm(0);
     Serial.printf("/off -> pwm = %u\n", curr_pwm);
     analogWrite(FANPOWER_PIN, curr_pwm);
-    auto_fan = false;
+    if( auto_fan == true ) {
+      auto_fan = false;
+      setEeprom();
+    }
 
     web_server.sendHeader("Location", "/");
     web_server.send(302, "text/plain", "ok");
@@ -399,6 +433,9 @@ void setup() {
   // Fast led blink frequency during setup
   pinMode(LED_PIN, OUTPUT);
   ticker.attach(0.2, tick);
+
+  EEPROM.begin(sizeof(eeprom_t));
+  getEeprom();
 
   pinMode(FANPOWER_PIN, OUTPUT);
   analogWriteFreq(100*1000);           // high ultrasonic or fan will beep
