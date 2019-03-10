@@ -266,6 +266,33 @@ void validate_sensor_data( struct bme280_data *comp_data ) {
 }
 
 
+void fan_control() {
+  if( auto_fan ) {
+    uint16_t old = curr_pwm;
+    if( comp_data.temperature >= MIN_TEMP && comp_data.temperature <= MAX_TEMP
+     && comp_data.humidity >= START_HUMI ) {
+      if( comp_data.humidity > FULL_HUMI ) {
+        curr_pwm = percent2pwm(100);
+      }
+      else {
+        curr_pwm = percent2pwm(map((long)(comp_data.humidity*10), START_HUMI*10, FULL_HUMI*10, 0, 100));
+      }
+    }
+    else {
+      curr_pwm = percent2pwm(0);
+    }
+
+    if( old != curr_pwm ) {
+      if( old == 0 ) {
+        analogWrite(FANPOWER_PIN, percent2pwm(100));
+        delay(100);
+      }
+      analogWrite(FANPOWER_PIN, curr_pwm);
+    }
+  }
+}
+
+
 void respond() {
   digitalWrite(LED_PIN, LED_OFF);
   web_server.sendHeader("Connection", "close");
@@ -374,7 +401,7 @@ void setupWifi() {
 
     auto_fan = !auto_fan;
     setEeprom();
-
+    fan_control();
     Serial.printf("/auto fan: %s\n", auto_fan ? "on" : "off");
 
     web_server.sendHeader("Location", "/");
@@ -524,33 +551,6 @@ void handle_button() {
     if( pressed_since != 0 ) {
       pressed_since = 0;
       digitalWrite(LED_PIN, LED_ON);
-    }
-  }
-}
-
-
-void fan_control() {
-  if( auto_fan ) {
-    uint16_t old = curr_pwm;
-    if( comp_data.temperature >= MIN_TEMP && comp_data.temperature <= MAX_TEMP
-     && comp_data.humidity >= START_HUMI ) {
-      if( comp_data.humidity > FULL_HUMI ) {
-        curr_pwm = percent2pwm(100);
-      }
-      else {
-        curr_pwm = percent2pwm(map((long)(comp_data.humidity*10), START_HUMI*10, FULL_HUMI*10, 0, 100));
-      }
-    }
-    else {
-      curr_pwm = percent2pwm(0);
-    }
-    
-    if( old != curr_pwm ) {
-      if( old == 0 ) {
-        analogWrite(FANPOWER_PIN, percent2pwm(100));
-        delay(100);
-      }
-      analogWrite(FANPOWER_PIN, curr_pwm);
     }
   }
 }
